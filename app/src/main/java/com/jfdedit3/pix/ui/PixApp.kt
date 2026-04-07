@@ -42,6 +42,7 @@ private sealed class Screen(val route: String, val label: String) {
     data object Profile : Screen("profile", "Profile")
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PixApp() {
     val navController = rememberNavController()
