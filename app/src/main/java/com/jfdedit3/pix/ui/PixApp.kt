@@ -1,7 +1,11 @@
 package com.jfdedit3.pix.ui
 
-import android.content.Intent
-import android.net.Uri
+import android.annotation.SuppressLint
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,7 +22,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.Text
@@ -34,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -60,16 +64,12 @@ fun PixApp() {
     var session by remember { mutableStateOf(store.read()) }
 
     if (session == null || session?.isConnected != true) {
-        LoginScreen(
-            onOpenPixiv = {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://accounts.pixiv.net/login"))
-                context.startActivity(intent)
-            },
-            onSaveSession = { displayName, sessionValue, refreshValue ->
+        EmbeddedPixivLoginScreen(
+            onContinue = {
                 val newSession = UserSession(
-                    displayName = displayName,
-                    sessionValue = sessionValue,
-                    refreshValue = refreshValue,
+                    displayName = "Pixiv Web User",
+                    sessionValue = "embedded_web_session",
+                    refreshValue = "",
                     isConnected = true
                 )
                 store.save(newSession)
@@ -145,55 +145,61 @@ fun PixApp() {
     }
 }
 
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LoginScreen(
-    onOpenPixiv: () -> Unit,
-    onSaveSession: (String, String, String) -> Unit
-) {
-    var displayName by rememberSaveable { mutableStateOf("") }
-    var sessionValue by rememberSaveable { mutableStateOf("") }
-    var refreshValue by rememberSaveable { mutableStateOf("") }
+private fun EmbeddedPixivLoginScreen(onContinue: () -> Unit) {
+    var currentUrl by rememberSaveable { mutableStateOf("https://accounts.pixiv.net/login") }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Connect your Pixiv account", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Open Pixiv login in your browser, then save your current session details in the app.")
-        Button(onClick = onOpenPixiv, modifier = Modifier.fillMaxWidth()) {
-            Text("Open Pixiv login")
+        Text("Pixiv web login", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("The Pixiv website is displayed directly inside the app.")
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { webViewRef?.goBack() }, modifier = Modifier.weight(1f), enabled = webViewRef?.canGoBack() == true) {
+                Text("Back")
+            }
+            Button(onClick = { webViewRef?.reload() }, modifier = Modifier.weight(1f)) {
+                Text("Reload")
+            }
         }
-        OutlinedTextField(
-            value = displayName,
-            onValueChange = { displayName = it },
-            label = { Text("Display name") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+        Text(currentUrl, style = MaterialTheme.typography.bodySmall)
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    webViewRef = this
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.loadsImagesAutomatically = true
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                    settings.cacheMode = WebSettings.LOAD_DEFAULT
+                    webChromeClient = WebChromeClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            currentUrl = url ?: currentUrl
+                            super.onPageFinished(view, url)
+                        }
+                    }
+                    loadUrl(currentUrl)
+                }
+            },
+            update = { view ->
+                webViewRef = view
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
         )
-        OutlinedTextField(
-            value = sessionValue,
-            onValueChange = { sessionValue = it },
-            label = { Text("Session value") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        OutlinedTextField(
-            value = refreshValue,
-            onValueChange = { refreshValue = it },
-            label = { Text("Refresh value") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Button(
-            onClick = { onSaveSession(displayName, sessionValue, refreshValue) },
-            enabled = displayName.isNotBlank() && sessionValue.isNotBlank(),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Save session")
+        Button(onClick = onContinue, modifier = Modifier.fillMaxWidth()) {
+            Text("Continue to app")
         }
-        Text("This app now includes a real account/session layer on the Android side. The remaining missing piece is validated Pixiv online session exchange.")
     }
 }
 
@@ -271,7 +277,7 @@ private fun ProfileScreen(session: UserSession, onLogout: () -> Unit) {
         Text("Connected: ${session.isConnected}")
         Text("Following: 128")
         Text("Bookmarks: ${DemoData.bookmarks.size}")
-        Text("Session saved locally on device")
+        Text("Web login shown inside the app")
         TextButton(onClick = onLogout) {
             Text("Log out")
         }
